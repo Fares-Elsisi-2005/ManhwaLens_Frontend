@@ -171,14 +171,16 @@ async function processFileOnline(file) {
 }
 
 async function sendPDFToBackend(file, retries = 3) {
+    /* http://localhost:3000/process-pdf */
+    /* https://manhwatranslator-backend.fly.dev/process-pdf */
   const pdfBase64 = await readFileAsDataURL(file);
   for (let i = 0; i < retries; i++) {
     try {
-      const response = await axios.post('https://manhwatranslator-backend.fly.dev/process-pdf', {
-        pdf: pdfBase64.split(',')[1]
+      const response = await axios.post('http://localhost:3000/process-pdf', {
+        pdf: pdfBase64.split(',')[1] 
       }, {
         headers: { 'Content-Type': 'application/json' },
-        timeout: 60000
+        timeout: 240000
       });
       if (response.data.error) throw new Error(response.data.error);
       return response.data.pages;
@@ -572,7 +574,7 @@ elements.saveOfflineButton.addEventListener("click", () => {
     }
 });
 
-function generateAndDownloadOfflineHTML(dataToSave) {
+/* function generateAndDownloadOfflineHTML(dataToSave) {
     for (const page of dataToSave) {
         if (!page.imgData || !isValidBase64Image(page.imgData)) {
             console.error(`Invalid image data for page ${page.pageNum} in offline HTML`);
@@ -755,6 +757,267 @@ function generateAndDownloadOfflineHTML(dataToSave) {
             if (offlinePagesData.length > 0) renderOfflinePages(offlinePagesData);
             else offlineContainer.innerHTML = "<p>لم يتم العثور على بيانات مانهوا مخزنة.</p>";
         });
+    </script>
+</body>
+</html>`;
+    const blob = new Blob([htmlContent], { type: "text/html" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `manhwa_offline_${Date.now()}.html`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+    console.log("Offline HTML generated");
+    elements.output.textContent += "\nتم إنشاء ملف HTML للقراءة Offline.";
+} */
+
+
+    function generateAndDownloadOfflineHTML(dataToSave) {
+    for (const page of dataToSave) {
+        if (!page.imgData || !isValidBase64Image(page.imgData)) {
+            console.error(`Invalid image data for page ${page.pageNum} in offline HTML`);
+            elements.output.textContent += `Error: Invalid image data for page ${page.pageNum} in offline HTML\n`;
+        } else {
+            console.log(`Offline HTML page ${page.pageNum} imgData length: ${page.imgData.length}`);
+        }
+        if (!page.wordsData || page.wordsData.length === 0) {
+            console.warn(`No words data for page ${page.pageNum} in offline HTML`);
+            elements.output.textContent += `Warning: No word boxes will be available for page ${page.pageNum} in offline HTML\n`;
+        }
+    }
+    const htmlContent = `
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مانهوا (أوفلاين) - ${new Date().toLocaleDateString()}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+        #container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 20px auto;
+            max-width: 100%;
+        }
+        .page-container {
+            position: relative;
+            margin-bottom: 20px;
+            width: 100%;
+            max-width: 100%;
+            display: flex;
+            justify-content: center;
+            box-sizing: border-box;
+        }
+        .page-image {
+            max-width: 90vw;
+            height: auto;
+            display: block;
+            position: relative;
+            z-index: 1;
+            visibility: visible;
+            box-sizing: border-box;
+        }
+        .word {
+            position: absolute;
+            border: 2px solid rgb(0 0 255 / 9%);
+            background: rgb(0 0 255 / 1%);
+            cursor: pointer;
+            z-index: 10;
+            pointer-events: auto;
+        }
+        .tooltip {
+            position: fixed;
+            background: #333;
+            color: #fff;
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 1000;
+            max-width: 200px;
+            text-align: left;
+            display: none;
+        }
+        .tooltip button {
+            margin-top: 5px;
+            padding: 5px 10px;
+            font-size: 12px;
+            background: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .image-error {
+            display: block;
+            color: red;
+            font-size: 16px;
+            margin: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>مانهوا للقراءة أوفلاين</h1>
+    <p>تم إنشاؤه في: ${new Date().toLocaleString()}</p>
+    <div id="container_offline"></div>
+    <div id="offlineDataStorage" style="display:none;">${JSON.stringify(dataToSave)}</div>
+    <script>
+        const offlineContainer = document.getElementById("container_offline");
+        const storedDataElement = document.getElementById("offlineDataStorage");
+        let offlinePagesData = [];
+        try {
+            offlinePagesData = JSON.parse(storedDataElement.textContent);
+        } catch (e) {
+            console.error("Failed to parse offline data:", e);
+            offlineContainer.innerHTML = "<p>خطأ في تحميل بيانات المانهوا.</p>";
+        }
+        function isValidBase64Image(base64Str) {
+            if (!base64Str || typeof base64Str !== 'string') return false;
+            const base64Regex = /^data:image\\/(jpeg|png);base64,[A-Za-z0-9+\\/=]+$/;
+            return base64Regex.test(base64Str) && base64Str.length > 100;
+        }
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const pageContainer = entry.target;
+                    const img = pageContainer.querySelector(".page-image");
+                    const pageNum = pageContainer.dataset.pageNum;
+                    const pageData = offlinePagesData.find(p => p.pageNum == pageNum);
+                    if (pageData && img) {
+                        if (pageData.wordsData?.length > 0) {
+                            drawWordBoxesOffline(pageData.wordsData, img, pageContainer);
+                            console.log(\`Word boxes drawn for offline page \${pageNum} via observer\`);
+                        } else {
+                            console.log(\`No words to draw for offline page \${pageNum}\`);
+                        }
+                    }
+                    observer.unobserve(entry.target);
+                }
+            });
+        }, { threshold: 0.1 });
+        function drawWordBoxesOffline(words, imgElement, pageContainerElement) {
+            const existingWords = pageContainerElement.querySelectorAll(".word");
+            existingWords.forEach(wordDiv => wordDiv.remove());
+            const scaleX = imgElement.clientWidth / imgElement.naturalWidth;
+            const scaleY = imgElement.clientHeight / imgElement.naturalHeight;
+            const imgRect = imgElement.getBoundingClientRect();
+            const containerRect = pageContainerElement.getBoundingClientRect();
+            const offsetX = imgRect.left - containerRect.left;
+            const offsetY = imgRect.top - containerRect.top;
+            console.log(\`Drawing \${words.length} word boxes for offline page\`);
+            for (const word of words) {
+                const box = word.bbox;
+                if (!box) continue;
+                const wordDiv = document.createElement("div");
+                wordDiv.className = "word";
+                wordDiv.style.left = \`\${(box.x0 * scaleX) + offsetX}px\`;
+                wordDiv.style.top = \`\${(box.y0 * scaleY) + offsetY}px\`;
+                wordDiv.style.width = \`\${(box.x1 - box.x0) * scaleX}px\`;
+                wordDiv.style.height = \`\${(box.y1 - box.y0) * scaleY}px\`;
+                pageContainerElement.appendChild(wordDiv);
+                wordDiv.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    showTooltipOffline(wordDiv, word.text, word.translation, e.clientX, e.clientY);
+                });
+            }
+        }
+        function showTooltipOffline(wordDiv, originalWord, translation, x, y) {
+            const existingTooltip = document.querySelector(".tooltip");
+            if (existingTooltip) existingTooltip.remove();
+            const tooltip = document.createElement("div");
+            tooltip.className = "tooltip";
+            tooltip.innerHTML = \`<div><strong>الكلمة:</strong> \${originalWord}<br><strong>الترجمة:</strong> \${translation}<br><button onclick="pronounceWordOffline('\${originalWord.replace(/[^a-zA-Z0-9\\\\s]/g, '')}')">نطق الكلمة</button></div>\`;
+            document.body.appendChild(tooltip);
+            const rect = tooltip.getBoundingClientRect();
+            let left = x + 15, top = y + 15;
+            if (left + rect.width > window.innerWidth) left = x - rect.width - 15;
+            if (top + rect.height > window.innerHeight) top = y - rect.height - 15;
+            if (left < 0) left = 5;
+            if (top < 0) top = 5;
+            tooltip.style.left = \`\${left}px\`;
+            tooltip.style.top = \`\${top}px\`;
+            tooltip.style.display = "block";
+            document.addEventListener("click", function closeTT(event) {
+                if (!tooltip.contains(event.target) && event.target !== wordDiv) {
+                    tooltip.remove();
+                    document.removeEventListener("click", closeTT, true);
+                }
+            }, true);
+        }
+        window.pronounceWordOffline = function (wordToPronounce) {
+            if (!window.speechSynthesis) {
+                alert("ميزة النطق غير مدعومة.");
+                return;
+            }
+            const utterance = new SpeechSynthesisUtterance(wordToPronounce);
+            utterance.lang = "en-US";
+            speechSynthesis.speak(utterance);
+        };
+        function redrawWordBoxesOnResizeOffline() {
+            if (!offlinePagesData || offlinePagesData.length === 0) return;
+            for (const pageData of offlinePagesData) {
+                const pageC = offlineContainer.querySelector(\`.page-container[data-page-num="\${pageData.pageNum}"]\`);
+                const imgEl = pageC?.querySelector(".page-image");
+                if (imgEl && pageC && pageData.wordsData?.length > 0) {
+                    requestAnimationFrame(() => {
+                        drawWordBoxesOffline(pageData.wordsData, imgEl, pageC);
+                        console.log(\`Redrawn boxes for offline page \${pageData.pageNum}\`);
+                    });
+                }
+            }
+        }
+        window.addEventListener("resize", redrawWordBoxesOnResizeOffline);
+        document.addEventListener("DOMContentLoaded", () => {
+            if (offlinePagesData.length > 0) renderOfflinePages(offlinePagesData);
+            else offlineContainer.innerHTML = "<p>لم يتم العثور على بيانات مانهوا مخزنة.</p>";
+        });
+        function renderOfflinePages(pagesToRender) {
+            offlineContainer.innerHTML = "";
+            for (const pageData of pagesToRender) {
+                if (!pageData.imgData || !isValidBase64Image(pageData.imgData)) {
+                    console.error(\`Invalid image data for page \${pageData.pageNum}\`);
+                    offlineContainer.innerHTML += \`<p class="image-error">Error: Invalid image data for page \${pageData.pageNum}</p>\`;
+                    continue;
+                }
+                const pageContainer = document.createElement("div");
+                pageContainer.className = "page-container";
+                pageContainer.dataset.pageNum = pageData.pageNum;
+                const img = document.createElement("img");
+                img.className = "page-image";
+                img.src = pageData.imgData;
+                img.alt = \`صفحة مانهوا \${pageData.pageNum}\`;
+                const testImg = new Image();
+                testImg.src = pageData.imgData;
+                testImg.onload = () => {
+                    pageContainer.appendChild(img);
+                    offlineContainer.appendChild(pageContainer);
+                    requestAnimationFrame(() => {
+                        if (pageData.wordsData?.length > 0) {
+                            drawWordBoxesOffline(pageData.wordsData, img, pageContainer);
+                            console.log(\`Word boxes drawn initially for offline page \${pageData.pageNum}\`);
+                        } else {
+                            console.log(\`No words to draw for offline page \${pageData.pageNum}\`);
+                        }
+                        observer.observe(pageContainer);
+                        console.log(\`Offline page \${pageData.pageNum} set for observer\`);
+                        pageContainer.offsetHeight;
+                    });
+                    console.log(\`Offline page \${pageData.pageNum} image loaded\`);
+                };
+                testImg.onerror = () => {
+                    console.error(\`Invalid image data for offline page \${pageData.pageNum}\`);
+                    offlineContainer.innerHTML += \`<p class="image-error">Error: Invalid image data for page \${pageData.pageNum}</p>\`;
+                };
+                img.onerror = () => console.error(\`Failed to render image for offline page \${pageData.pageNum}\`);
+            }
+        }
     </script>
 </body>
 </html>`;
