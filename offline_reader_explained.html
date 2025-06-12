@@ -1,0 +1,280 @@
+ 
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مانهوا (أوفلاين) - ${new Date().toLocaleDateString()}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+        #container_offline {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 20px auto;
+            max-width: 100%;
+        }
+        .page-container {
+            position: relative;
+            margin-bottom: 20px;
+            width: 100%;
+            max-width: 100%;
+            display: flex;
+            justify-content: center;
+            box-sizing: border-box;
+            min-height: 200px;
+        }
+        .page-image {
+            max-width: 90vw;
+            width: 100%;
+            height: auto;
+            display: block;
+            position: relative;
+            z-index: 1;
+            visibility: visible;
+            box-sizing: border-box;
+        }
+        .word-boxes-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .word {
+            position: absolute;
+            border: 2px solid rgb(0 0 255 / 1%);
+            background: rgb(0 0 255 / 1%);
+            cursor: pointer;
+            z-index: 10;
+            pointer-events: auto;
+        }
+        .tooltip {
+            position: fixed;
+            background: #333;
+            color: #fff;
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 1000;
+            max-width: 200px;
+            text-align: left;
+            display: none;
+        }
+        .tooltip button {
+            margin-top: 5px;
+            padding: 5px 10px;
+            font-size: 12px;
+            background: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .image-error {
+            display: block;
+            color: red;
+            font-size: 16px;
+            margin: 10px;
+        }
+        #json-upload {
+            margin: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>مانهوا للقراءة أوفلاين</h1>
+    <p>تم إنشاؤه في: ${new Date().toLocaleString()}</p>
+    <div id="json-upload">
+        <p>يرجى رفع ملف البيانات (manhwa_data_${timestamp}.json).</p>
+        <input type="file" id="json-file-input" accept=".json">
+        <button onclick="loadJsonManually()">تحميل البيانات</button>
+    </div>
+    <div id="container_offline"></div>
+    <script>
+        // Manual-upload-only offline reader: user must upload JSON file to view content
+        const offlineContainer = document.getElementById("container_offline");
+        const jsonUploadSection = document.getElementById("json-upload");
+        let offlinePagesData = [];
+
+        function loadJsonManually() {
+            const input = document.getElementById("json-file-input");
+            const file = input.files[0];
+            if (!file) {
+                alert("يرجى اختيار ملف JSON.");
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                try {
+                    offlinePagesData = JSON.parse(e.target.result);
+                    if (!Array.isArray(offlinePagesData) || offlinePagesData.length === 0) {
+                        throw new Error("بيانات غير صالحة في ملف JSON");
+                    }
+                    jsonUploadSection.style.display = "none";
+                    renderOfflinePages(offlinePagesData);
+                } catch (error) {
+                    alert("خطأ: ملف JSON غير صالح.");
+                    offlineContainer.innerHTML = "<p>خطأ: ملف JSON غير صالح.</p>";
+                }
+            };
+            reader.onerror = function () {
+                alert("خطأ: فشل قراءة ملف JSON.");
+                offlineContainer.innerHTML = "<p>خطأ: فشل قراءة ملف JSON.</p>";
+            };
+            reader.readAsText(file);
+        }
+
+        function isValidBase64Image(base64Str) {
+            if (!base64Str || typeof base64Str !== 'string') return false;
+            const base64Regex = /^data:image\/(jpeg|png);base64,[A-Za-z0-9+\/=]+$/;
+            return base64Regex.test(base64Str) && base64Str.length > 100;
+        }
+
+        function drawWordBoxesOffline(words, imgElement, pageContainerElement) {
+            let boxesContainer = pageContainerElement.querySelector('.word-boxes-container');
+            if (boxesContainer) boxesContainer.remove();
+            boxesContainer = document.createElement('div');
+            boxesContainer.className = 'word-boxes-container';
+            boxesContainer.style.position = 'absolute';
+            boxesContainer.style.top = '0';
+            boxesContainer.style.left = '0';
+            boxesContainer.style.width = '100%';
+            boxesContainer.style.height = '100%';
+            boxesContainer.style.pointerEvents = 'none';
+            boxesContainer.style.zIndex = '10';
+            pageContainerElement.appendChild(boxesContainer);
+            const naturalWidth = imgElement.naturalWidth;
+            const naturalHeight = imgElement.naturalHeight;
+            if (!naturalWidth || !naturalHeight) return;
+            for (var i = 0; i < words.length; i++) {
+                var word = words[i];
+                var box = word.bbox;
+                if (!box) continue;
+                var wordDiv = document.createElement('div');
+                wordDiv.className = 'word';
+                wordDiv.style.position = 'absolute';
+                wordDiv.style.left = ((box.x0 / naturalWidth) * 100) + '%';
+                wordDiv.style.top = ((box.y0 / naturalHeight) * 100) + '%';
+                wordDiv.style.width = (((box.x1 - box.x0) / naturalWidth) * 100) + '%';
+                wordDiv.style.height = (((box.y1 - box.y0) / naturalHeight) * 100) + '%';
+                wordDiv.style.pointerEvents = 'auto';
+                wordDiv.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    showTooltipOffline(this, word.text, word.translation, e.clientX, e.clientY);
+                }.bind(wordDiv, word));
+                boxesContainer.appendChild(wordDiv);
+            }
+        }
+
+        function ensureDrawWordBoxes(words, imgElement, pageContainerElement) {
+            if (imgElement.complete && imgElement.naturalWidth && imgElement.naturalHeight) {
+                drawWordBoxesOffline(words, imgElement, pageContainerElement);
+            } else {
+                imgElement.onload = function() {
+                    drawWordBoxesOffline(words, imgElement, pageContainerElement);
+                };
+            }
+        }
+
+        function showTooltipOffline(wordDiv, originalWord, translation, x, y) {
+            var existingTooltip = document.querySelector('.tooltip');
+            if (existingTooltip) existingTooltip.remove();
+            var tooltip = document.createElement('div');
+            tooltip.className = 'tooltip';
+            var safeWord = originalWord.replace(/[^a-zA-Z0-9\s]/g, '').replace(/'/g, "\\'");
+            tooltip.innerHTML = '<div><strong>الكلمة:</strong> ' + originalWord + '<br><strong>الترجمة:</strong> ' + translation + '<br><button onclick=\'pronounceWordOffline("' + safeWord + '")\'>نطق الكلمة</button></div>';
+            document.body.appendChild(tooltip);
+            var rect = tooltip.getBoundingClientRect();
+            var left = x + 15, top = y + 15;
+            if (left + rect.width > window.innerWidth) left = x - rect.width - 15;
+            if (top + rect.height > window.innerHeight) top = y - rect.height - 15;
+            if (left < 0) left = 5;
+            if (top < 0) top = 5;
+            tooltip.style.left = left + 'px';
+            tooltip.style.top = top + 'px';
+            tooltip.style.display = 'block';
+            document.addEventListener('click', function closeTT(event) {
+                if (!tooltip.contains(event.target) && event.target !== wordDiv) {
+                    tooltip.remove();
+                    document.removeEventListener('click', closeTT, true);
+                }
+            }, true);
+        }
+
+        window.pronounceWordOffline = function (wordToPronounce) {
+            if (!window.speechSynthesis) {
+                alert('ميزة النطق غير مدعومة.');
+                return;
+            }
+            var utterance = new SpeechSynthesisUtterance(wordToPronounce);
+            utterance.lang = 'en-US';
+            speechSynthesis.speak(utterance);
+        };
+
+        function redrawWordBoxesOnResizeOffline() {
+            if (!offlinePagesData || offlinePagesData.length === 0) return;
+            for (var i = 0; i < offlinePagesData.length; i++) {
+                (function(pageData, pageC, imgEl) {
+                    if (imgEl && pageC && pageData.wordsData && pageData.wordsData.length > 0) {
+                        requestAnimationFrame(function() {
+                            ensureDrawWordBoxes(pageData.wordsData, imgEl, pageC);
+                        });
+                    }
+                })(
+                    offlinePagesData[i],
+                    offlineContainer.querySelector('.page-container[data-page-num="' + offlinePagesData[i].pageNum + '"]'),
+                    offlineContainer.querySelector('.page-container[data-page-num="' + offlinePagesData[i].pageNum + '"]')?.querySelector('.page-image')
+                );
+            }
+        }
+        window.addEventListener('resize', redrawWordBoxesOnResizeOffline);
+
+        // No auto-load: user must upload JSON file manually
+        // No DOMContentLoaded handler for loading data
+
+        function renderOfflinePages(pagesToRender) {
+            offlineContainer.innerHTML = '';
+            for (var i = 0; i < pagesToRender.length; i++) {
+                var pageData = pagesToRender[i];
+                if (!pageData.imgData || !isValidBase64Image(pageData.imgData)) {
+                    offlineContainer.innerHTML += '<p class="image-error">Error: Invalid image data for page ' + pageData.pageNum + '</p>';
+                    continue;
+                }
+                if (!pageData.wordsData || !Array.isArray(pageData.wordsData)) {
+                    pageData.wordsData = [];
+                }
+                var pageContainer = document.createElement('div');
+                pageContainer.className = 'page-container';
+                pageContainer.dataset.pageNum = pageData.pageNum;
+                var img = document.createElement('img');
+                img.className = 'page-image';
+                img.dataset.src = pageData.imgData;
+                img.alt = 'صفحة مانهوا ' + pageData.pageNum;
+                img.style.width = '100%';
+                img.style.height = 'auto';
+                pageContainer.appendChild(img);
+                offlineContainer.appendChild(pageContainer);
+                // Lazy load: set src and draw boxes when visible
+                const observer = new IntersectionObserver(function(entries, observer) {
+                    entries.forEach(function(entry) {
+                        if (entry.isIntersecting) {
+                            if (!img.src) img.src = img.dataset.src;
+                            ensureDrawWordBoxes(pageData.wordsData, img, pageContainer);
+                            observer.unobserve(entry.target);
+                        }
+                    });
+                }, { threshold: 0.1 });
+                observer.observe(pageContainer);
+            }
+        }
+    </script>
+</body>
+</html>

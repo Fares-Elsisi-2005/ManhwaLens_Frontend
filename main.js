@@ -1,4 +1,4 @@
- const config = {
+     const config = {
     pdfScale: 1.5,
     imageQuality: 0.7,
     debounceDelay: 100,
@@ -28,7 +28,7 @@ const elements = {
 let db, translationCache = new Map(), processedPagesDataForOffline = [];
 if (typeof pdfjsLib !== 'undefined') {
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.worker.min.js';
-}
+} 
 
 async function initIndexedDB() {
     return new Promise((resolve, reject) => {
@@ -138,8 +138,12 @@ async function processFileOnline(file) {
     elements.saveOfflineButton.style.display = "none";
     elements.loading.style.display = "block";
     try {
+        console.log("in try");
         await clearIndexedDB();
+        console.log("done1");
         await initIndexedDB();
+        console.log("done2");
+
         let pagesData;
         if (file.type === "application/pdf") {
             console.log("Processing PDF via backend...");
@@ -573,21 +577,59 @@ elements.saveOfflineButton.addEventListener("click", () => {
         alert("لا توجد بيانات لمعالجتها وحفظها.");
     }
 });
+ 
 
-/* function generateAndDownloadOfflineHTML(dataToSave) {
-    for (const page of dataToSave) {
-        if (!page.imgData || !isValidBase64Image(page.imgData)) {
-            console.error(`Invalid image data for page ${page.pageNum} in offline HTML`);
-            elements.output.textContent += `Error: Invalid image data for page ${page.pageNum} in offline HTML\n`;
-        } else {
-            console.log(`Offline HTML page ${page.pageNum} imgData length: ${page.imgData.length}`);
+   // This function generates and downloads both the offline HTML and JSON data files for the processed manhwa pages
+   async function generateAndDownloadOfflineHTML(dataToSave) {
+    elements.loading.style.display = "block";
+    elements.output.textContent = "جاري إنشاء ملفات الـ offline، الرجاء الانتظار...\n";
+    try {
+        const cleanedData = [];
+        for (const page of dataToSave) {
+            if (!page.imgData || !isValidBase64Image(page.imgData)) {
+                console.error(`Invalid image data for page ${page.pageNum}, imgData length: ${page.imgData?.length || 0}, starts with: ${page.imgData?.substring(0, 50) || 'undefined'}`);
+                elements.output.textContent += `خطأ: تخطي الصفحة ${page.pageNum} بسبب بيانات صورة غير صالحة\n`;
+                continue;
+            }
+            if (!page.wordsData || !Array.isArray(page.wordsData)) {
+                console.warn(`No words data for page ${page.pageNum}`);
+                page.wordsData = [];
+            }
+            cleanedData.push({
+                imgData: page.imgData,
+                wordsData: page.wordsData,
+                pageNum: page.pageNum
+            });
+            console.log(`Page ${page.pageNum} added to cleanedData, imgData length: ${page.imgData.length}`);
         }
-        if (!page.wordsData || page.wordsData.length === 0) {
-            console.warn(`No words data for page ${page.pageNum} in offline HTML`);
-            elements.output.textContent += `Warning: No word boxes will be available for page ${page.pageNum} in offline HTML\n`;
+        if (cleanedData.length === 0) {
+            throw new Error("لا توجد بيانات صفحات صالحة للحفظ");
         }
-    }
-    const htmlContent = `
+        console.log(`Total pages in cleanedData: ${cleanedData.length}`);
+        const timestamp = Date.now();
+        let jsonData;
+        try {
+            const tempData = [];
+            for (const page of cleanedData) {
+                const pageJson = JSON.stringify(page);
+                JSON.parse(pageJson);
+                tempData.push(pageJson);
+            }
+            jsonData = `[${tempData.join(",")}]`;
+            JSON.parse(jsonData);
+        } catch (error) {
+            console.error("Failed to convert data to JSON:", error);
+            throw new Error("فشل تحويل البيانات إلى JSON: " + error.message);
+        }
+        const jsonBlob = new Blob([jsonData], { type: "application/json" });
+        const jsonLink = document.createElement("a");
+        jsonLink.href = URL.createObjectURL(jsonBlob);
+        jsonLink.download = `manhwa_data_${timestamp}.json`;
+        document.body.appendChild(jsonLink);
+        jsonLink.click();
+        document.body.removeChild(jsonLink);
+        URL.revokeObjectURL(jsonLink.href);
+        const htmlContent = `\
 <!DOCTYPE html>
 <html lang="ar">
 <head>
@@ -595,442 +637,247 @@ elements.saveOfflineButton.addEventListener("click", () => {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>مانهوا (أوفلاين) - ${new Date().toLocaleDateString()}</title>
     <style>
-        body{font-family:Arial,sans-serif;text-align:center;background-color:#f4f4f4;margin:0}
-        #container{display:flex;flex-direction:column;align-items:center;margin:20px}
-        .page-container{position:relative;margin-bottom:20px;width:fit-content;opacity:1}
-        .page-container.hidden{opacity:0;transition:opacity 0.5s}
-        .page-image{max-width:100%;display:block;position:relative;z-index:1;visibility:visible}
-        .word{position:absolute;border:2px solid rgb(0 0 255 / 9%);background:rgb(0 0 255 / 1%);cursor:pointer;z-index:10;pointer-events:auto}
-        .tooltip{position:fixed;background:#333;color:#fff;padding:10px;border-radius:5px;z-index:1000;max-width:200px;text-align:left;display:none}
-        .tooltip button{margin-top:5px;padding:5px 10px;font-size:12px;background:#007bff;color:#fff;border:none;border-radius:3px;cursor:pointer}
-        .image-error{display:block;color:red;font-size:16px;margin:10px}
+        body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f4; margin: 0; padding: 0; }
+        #container_offline { display: flex; flex-direction: column; align-items: center; margin: 20px auto; max-width: 100%; }
+        .page-container { position: relative; margin-bottom: 20px; width: 100%; max-width: 100%; display: flex; justify-content: center; box-sizing: border-box; min-height: 200px; }
+        .page-image { max-width: 90vw; width: 100%; height: auto; display: block; position: relative; z-index: 1; visibility: visible; box-sizing: border-box; }
+        .word-boxes-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+        .word { position: absolute; border: 2px solid rgb(0 0 255 / 1%); background: rgb(0 0 255 / 1%); cursor: pointer; z-index: 10; pointer-events: auto; }
+        .tooltip { position: fixed; background: #333; color: #fff; padding: 10px; border-radius: 5px; z-index: 1000; max-width: 200px; text-align: left; display: none; }
+        .tooltip button { margin-top: 5px; padding: 5px 10px; font-size: 12px; background: #007bff; color: #fff; border: none; border-radius: 3px; cursor: pointer; }
+        .image-error { display: block; color: red; font-size: 16px; margin: 10px; }
+        #json-upload { margin: 20px; }
     </style>
 </head>
 <body>
     <h1>مانهوا للقراءة أوفلاين</h1>
     <p>تم إنشاؤه في: ${new Date().toLocaleString()}</p>
+    <div id="json-upload">
+        <p>يرجى رفع ملف البيانات (manhwa_data_${timestamp}.json).</p>
+        <input type="file" id="json-file-input" accept=".json">
+        <button onclick="loadJsonManually()">تحميل البيانات</button>
+    </div>
     <div id="container_offline"></div>
-    <div id="offlineDataStorage" style="display:none;">${JSON.stringify(dataToSave)}</div>
     <script>
-        const offlineContainer = document.getElementById("container_offline");
-        const storedDataElement = document.getElementById("offlineDataStorage");
-        let offlinePagesData = [];
-        try {
-            offlinePagesData = JSON.parse(storedDataElement.textContent);
-        } catch (e) {
-            console.error("Failed to parse offline data:", e);
-            offlineContainer.innerHTML = "<p>خطأ في تحميل بيانات المانهوا.</p>";
+        window.loadJsonManually = function() {
+            const input = document.getElementById("json-file-input");
+            const file = input.files[0];
+            if (!file) {
+                alert("يرجى اختيار ملف JSON.");
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                try {
+                    offlinePagesData = JSON.parse(e.target.result);
+                    if (!Array.isArray(offlinePagesData) || offlinePagesData.length === 0) {
+                        throw new Error("بيانات غير صالحة في ملف JSON");
+                    }
+                    console.log("Loaded JSON with " + offlinePagesData.length + " pages");
+                    jsonUploadSection.style.display = "none";
+                    renderOfflinePages(offlinePagesData);
+                } catch (error) {
+                    alert("خطأ: ملف JSON غير صالح.");
+                    console.error("JSON parsing error:", error);
+                    offlineContainer.innerHTML = "<p>خطأ: ملف JSON غير صالح.</p>";
+                }
+            };
+            reader.onerror = function () {
+                alert("خطأ: فشل قراءة ملف JSON.");
+                console.error("File reading error");
+                offlineContainer.innerHTML = "<p>خطأ: فشل قراءة ملف JSON.</p>";
+            };
+            reader.readAsText(file);
         }
+        const offlineContainer = document.getElementById("container_offline");
+        const jsonUploadSection = document.getElementById("json-upload");
+        let offlinePagesData = [];
+
         function isValidBase64Image(base64Str) {
             if (!base64Str || typeof base64Str !== 'string') return false;
-            const base64Regex = /^data:image\\/(jpeg|png);base64,[A-Za-z0-9+\\/=]+$/;
+            const base64Regex = new RegExp('^data:image/(jpeg|png);base64,[A-Za-z0-9+/=]+$');
             return base64Regex.test(base64Str) && base64Str.length > 100;
         }
-        const observer = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    const pageContainer = entry.target;
-                    const img = pageContainer.querySelector(".page-image");
-                    const pageNum = pageContainer.dataset.pageNum;
-                    const pageData = offlinePagesData.find(p => p.pageNum == pageNum);
-                    if (pageData && img) {
-                        if (pageData.wordsData?.length > 0) {
-                            drawWordBoxesOffline(pageData.wordsData, img, pageContainer);
-                            console.log(\`Word boxes drawn for offline page \${pageNum} via observer\`);
-                        } else {
-                            console.log(\`No words to draw for offline page \${pageNum}\`);
-                        }
-                    }
-                    observer.unobserve(entry.target);
-                }
-            });
-        }, { threshold: 0.1 });
+
         function drawWordBoxesOffline(words, imgElement, pageContainerElement) {
-            const existingWords = pageContainerElement.querySelectorAll(".word");
-            existingWords.forEach(wordDiv => wordDiv.remove());
-            const scaleX = imgElement.clientWidth / imgElement.naturalWidth;
-            const scaleY = imgElement.clientHeight / imgElement.naturalHeight;
-            console.log(\`Drawing \${words.length} word boxes for offline page\`);
-            for (const word of words) {
-                const box = word.bbox;
+            let boxesContainer = pageContainerElement.querySelector('.word-boxes-container');
+            if (boxesContainer) boxesContainer.remove();
+            boxesContainer = document.createElement('div');
+            boxesContainer.className = 'word-boxes-container';
+            boxesContainer.style.position = 'absolute';
+            boxesContainer.style.top = '0';
+            boxesContainer.style.left = '0';
+            boxesContainer.style.width = '100%';
+            boxesContainer.style.height = '100%';
+            boxesContainer.style.pointerEvents = 'none';
+            boxesContainer.style.zIndex = '10';
+            pageContainerElement.appendChild(boxesContainer);
+            const naturalWidth = imgElement.naturalWidth;
+            const naturalHeight = imgElement.naturalHeight;
+            if (!naturalWidth || !naturalHeight) {
+                console.error("Invalid image dimensions for page");
+                return;
+            }
+            for (var i = 0; i < words.length; i++) {
+                var word = words[i];
+                var box = word.bbox;
                 if (!box) continue;
-                const wordDiv = document.createElement("div");
-                wordDiv.className = "word";
-                wordDiv.style.left = \`\${box.x0 * scaleX}px\`;
-                wordDiv.style.top = \`\${box.y0 * scaleY}px\`;
-                wordDiv.style.width = \`\${(box.x1 - box.x0) * scaleX}px\`;
-                wordDiv.style.height = \`\${(box.y1 - box.y0) * scaleY}px\`;
-                pageContainerElement.appendChild(wordDiv);
-                wordDiv.addEventListener("click", (e) => {
-                    e.stopPropagation();
-                    showTooltipOffline(wordDiv, word.text, word.translation, e.clientX, e.clientY);
-                });
+                var wordDiv = document.createElement('div');
+                wordDiv.className = 'word';
+                wordDiv.style.position = 'absolute';
+                wordDiv.style.left = ((box.x0 / naturalWidth) * 100) + '%';
+                wordDiv.style.top = ((box.y0 / naturalHeight) * 100) + '%';
+                wordDiv.style.width = (((box.x1 - box.x0) / naturalWidth) * 100) + '%';
+                wordDiv.style.height = (((box.y1 - box.y0) / naturalHeight) * 100) + '%';
+                wordDiv.style.pointerEvents = 'auto';
+                wordDiv.addEventListener('click', (function(word) {
+                    return function(e) {
+                        e.stopPropagation();
+                        showTooltipOffline(wordDiv, word.text, word.translation, e.clientX, e.clientY);
+                    };
+                })(word));
+                boxesContainer.appendChild(wordDiv);
             }
         }
+
+        function ensureDrawWordBoxes(words, imgElement, pageContainerElement) {
+            if (imgElement.complete && imgElement.naturalWidth && imgElement.naturalHeight) {
+                drawWordBoxesOffline(words, imgElement, pageContainerElement);
+            } else {
+                imgElement.onload = function() {
+                    console.log("Image loaded for page " + pageContainerElement.dataset.pageNum);
+                    drawWordBoxesOffline(words, imgElement, pageContainerElement);
+                };
+                imgElement.onerror = function() {
+                    console.error("Failed to load image for page " + pageContainerElement.dataset.pageNum);
+                    pageContainerElement.innerHTML += "<p class='image-error'>Error: Failed to load image for page " + pageContainerElement.dataset.pageNum + "</p>";
+                };
+            }
+        }
+
         function showTooltipOffline(wordDiv, originalWord, translation, x, y) {
-            const existingTooltip = document.querySelector(".tooltip");
+            var existingTooltip = document.querySelector('.tooltip');
             if (existingTooltip) existingTooltip.remove();
-            const tooltip = document.createElement("div");
-            tooltip.className = "tooltip";
-            tooltip.innerHTML = \`<div><strong>الكلمة:</strong> \${originalWord}<br><strong>الترجمة:</strong> \${translation}<br><button onclick="pronounceWordOffline('\${originalWord.replace(/[^a-zA-Z0-9\\\\s]/g, '')}')">نطق الكلمة</button></div>\`;
+            var tooltip = document.createElement('div');
+            tooltip.className = 'tooltip';
+            var contentDiv = document.createElement('div');
+            var wordStrong = document.createElement('strong');
+            wordStrong.textContent = 'الكلمة: ';
+            contentDiv.appendChild(wordStrong);
+            contentDiv.appendChild(document.createTextNode(originalWord));
+            contentDiv.appendChild(document.createElement('br'));
+            var transStrong = document.createElement('strong');
+            transStrong.textContent = 'الترجمة: ';
+            contentDiv.appendChild(transStrong);
+            contentDiv.appendChild(document.createTextNode(translation));
+            contentDiv.appendChild(document.createElement('br'));
+            var button = document.createElement('button');
+            button.textContent = 'نطق الكلمة';
+            button.addEventListener('click', function() {
+                pronounceWordOffline(originalWord);
+            });
+            contentDiv.appendChild(button);
+            tooltip.appendChild(contentDiv);
             document.body.appendChild(tooltip);
-            const rect = tooltip.getBoundingClientRect();
-            let left = x + 15, top = y + 15;
+            var rect = tooltip.getBoundingClientRect();
+            var left = x + 15, top = y + 15;
             if (left + rect.width > window.innerWidth) left = x - rect.width - 15;
             if (top + rect.height > window.innerHeight) top = y - rect.height - 15;
             if (left < 0) left = 5;
             if (top < 0) top = 5;
-            tooltip.style.left = \`\${left}px\`;
-            tooltip.style.top = \`\${top}px\`;
-            tooltip.style.display = "block";
-            document.addEventListener("click", function closeTT(event) {
+            tooltip.style.left = left + 'px';
+            tooltip.style.top = top + 'px';
+            tooltip.style.display = 'block';
+            document.addEventListener('click', function closeTT(event) {
                 if (!tooltip.contains(event.target) && event.target !== wordDiv) {
                     tooltip.remove();
-                    document.removeEventListener("click", closeTT, true);
+                    document.removeEventListener('click', closeTT, true);
                 }
             }, true);
         }
+
         window.pronounceWordOffline = function (wordToPronounce) {
             if (!window.speechSynthesis) {
-                alert("ميزة النطق غير مدعومة.");
+                alert('ميزة النطق غير مدعومة.');
                 return;
             }
-            const utterance = new SpeechSynthesisUtterance(wordToPronounce);
-            utterance.lang = "en-US";
-            speechSynthesis.speak(utterance);
-        };
-        function renderOfflinePages(pagesToRender) {
-            offlineContainer.innerHTML = "";
-            for (const pageData of pagesToRender) {
-                if (!pageData.imgData || !isValidBase64Image(pageData.imgData)) {
-                    console.error(\`Invalid image data for page \${pageData.pageNum}\`);
-                    offlineContainer.innerHTML += \`<p class="image-error">Error: Invalid image data for page \${pageData.pageNum}</p>\`;
-                    continue;
-                }
-                const pageContainer = document.createElement("div");
-                pageContainer.className = "page-container";
-                pageContainer.dataset.pageNum = pageData.pageNum;
-                const img = document.createElement("img");
-                img.className = "page-image";
-                img.src = pageData.imgData;
-                img.alt = \`صفحة مانهوا \${pageData.pageNum}\`;
-                const testImg = new Image();
-                testImg.src = pageData.imgData;
-                testImg.onload = () => {
-                    pageContainer.appendChild(img);
-                    offlineContainer.appendChild(pageContainer);
-                    requestAnimationFrame(() => {
-                        if (pageData.wordsData?.length > 0) {
-                            drawWordBoxesOffline(pageData.wordsData, img, pageContainer);
-                            console.log(\`Word boxes drawn initially for offline page \${pageData.pageNum}\`);
-                        } else {
-                            console.log(\`No words to draw for offline page \${pageData.pageNum}\`);
-                        }
-                        observer.observe(pageContainer);
-                        console.log(\`Offline page \${pageData.pageNum} set for observer\`);
-                        pageContainer.offsetHeight;
-                    });
-                    console.log(\`Offline page \${pageData.pageNum} image loaded\`);
-                };
-                testImg.onerror = () => {
-                    console.error(\`Invalid image data for offline page \${pageData.pageNum}\`);
-                    offlineContainer.innerHTML += \`<p class="image-error">Error: Invalid image data for page \${pageData.pageNum}</p>\`;
-                };
-                img.onerror = () => console.error(\`Failed to render image for offline page \${pageData.pageNum}\`);
+            try {
+                var utterance = new SpeechSynthesisUtterance(wordToPronounce);
+                utterance.lang = 'en-US';
+                speechSynthesis.speak(utterance);
+            } catch(e) {
+                console.error('Pronunciation error:', e);
             }
-        }
+        };
+
         function redrawWordBoxesOnResizeOffline() {
             if (!offlinePagesData || offlinePagesData.length === 0) return;
-            for (const pageData of offlinePagesData) {
-                const pageC = offlineContainer.querySelector(\`.page-container[data-page-num="\${pageData.pageNum}"]\`);
-                const imgEl = pageC?.querySelector(".page-image");
-                if (imgEl && pageC && pageData.wordsData?.length > 0) {
-                    requestAnimationFrame(() => {
-                        drawWordBoxesOffline(pageData.wordsData, imgEl, pageC);
-                        console.log(\`Redrawn boxes for offline page \${pageData.pageNum}\`);
-                    });
-                }
+            for (var i = 0; i < offlinePagesData.length; i++) {
+                (function(pageData, pageC, imgEl) {
+                    if (imgEl && pageC && pageData.wordsData && pageData.wordsData.length > 0) {
+                        requestAnimationFrame(function() {
+                            ensureDrawWordBoxes(pageData.wordsData, imgEl, pageC);
+                        });
+                    }
+                })(
+                    offlinePagesData[i],
+                    offlineContainer.querySelector('.page-container[data-page-num="' + offlinePagesData[i].pageNum + '"]'),
+                    offlineContainer.querySelector('.page-container[data-page-num="' + offlinePagesData[i].pageNum + '"]')?.querySelector('.page-image')
+                );
             }
         }
-        window.addEventListener("resize", redrawWordBoxesOnResizeOffline);
-        document.addEventListener("DOMContentLoaded", () => {
-            if (offlinePagesData.length > 0) renderOfflinePages(offlinePagesData);
-            else offlineContainer.innerHTML = "<p>لم يتم العثور على بيانات مانهوا مخزنة.</p>";
-        });
+        window.addEventListener('resize', redrawWordBoxesOnResizeOffline);
+
+        function renderOfflinePages(pagesToRender) {
+            offlineContainer.innerHTML = '';
+            console.log("Rendering " + pagesToRender.length + " pages");
+            for (var i = 0; i < pagesToRender.length; i++) {
+                var pageData = pagesToRender[i];
+                console.log("Processing page " + pageData.pageNum + ", imgData length: " + (pageData.imgData?.length || 0) + ", valid: " + isValidBase64Image(pageData.imgData));
+                if (!pageData.imgData || !isValidBase64Image(pageData.imgData)) {
+                    console.error("Invalid image data for page " + pageData.pageNum + ", imgData starts with: " + (pageData.imgData?.substring(0, 50) || 'undefined'));
+                    offlineContainer.innerHTML += '<p class="image-error">Error: Invalid image data for page ' + pageData.pageNum + '</p>';
+                    continue;
+                }
+                if (!pageData.wordsData || !Array.isArray(pageData.wordsData)) {
+                    console.warn("No valid words data for page " + pageData.pageNum);
+                    pageData.wordsData = [];
+                }
+                var pageContainer = document.createElement('div');
+                pageContainer.className = 'page-container';
+                pageContainer.dataset.pageNum = pageData.pageNum;
+                var img = document.createElement('img');
+                img.className = 'page-image';
+                img.alt = 'صفحة مانهوا ' + pageData.pageNum;
+                img.style.width = '100%';
+                img.style.height = 'auto';
+                // Set src directly to avoid lazy-loading issues
+                img.src = pageData.imgData;
+                pageContainer.appendChild(img);
+                offlineContainer.appendChild(pageContainer);
+                // Draw word boxes immediately if image is loaded
+                ensureDrawWordBoxes(pageData.wordsData, img, pageContainer);
+            }
+        }
     </script>
 </body>
 </html>`;
-    const blob = new Blob([htmlContent], { type: "text/html" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `manhwa_offline_${Date.now()}.html`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(link.href);
-    console.log("Offline HTML generated");
-    elements.output.textContent += "\nتم إنشاء ملف HTML للقراءة Offline.";
-} */
-
-
-    function generateAndDownloadOfflineHTML(dataToSave) {
-    for (const page of dataToSave) {
-        if (!page.imgData || !isValidBase64Image(page.imgData)) {
-            console.error(`Invalid image data for page ${page.pageNum} in offline HTML`);
-            elements.output.textContent += `Error: Invalid image data for page ${page.pageNum} in offline HTML\n`;
-        } else {
-            console.log(`Offline HTML page ${page.pageNum} imgData length: ${page.imgData.length}`);
-        }
-        if (!page.wordsData || page.wordsData.length === 0) {
-            console.warn(`No words data for page ${page.pageNum} in offline HTML`);
-            elements.output.textContent += `Warning: No word boxes will be available for page ${page.pageNum} in offline HTML\n`;
-        }
+        const htmlBlob = new Blob([htmlContent], { type: "text/html" });
+        const htmlLink = document.createElement("a");
+        htmlLink.href = URL.createObjectURL(htmlBlob);
+        htmlLink.download = `manhwa_offline_${timestamp}.html`;
+        document.body.appendChild(htmlLink);
+        htmlLink.click();
+        document.body.removeChild(htmlLink);
+        URL.revokeObjectURL(htmlLink.href);
+        console.log("Offline HTML and JSON files generated successfully");
+        elements.output.textContent += "\nتم إنشاء ملفات HTML و JSON للقراءة أوفلاين. يرجى حفظ الملفين في نفس المجلد.";
+    } catch (error) {
+        console.error("Failed to generate offline files:", error);
+        elements.output.textContent += `خطأ: فشل إنشاء ملفات الـ offline: ${error.message}\n`;
+    } finally {
+        elements.loading.style.display = "none";
     }
-    const htmlContent = `
-<!DOCTYPE html>
-<html lang="ar">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>مانهوا (أوفلاين) - ${new Date().toLocaleDateString()}</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            text-align: center;
-            background-color: #f4f4f4;
-            margin: 0;
-            padding: 0;
-        }
-        #container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            margin: 20px auto;
-            max-width: 100%;
-        }
-        .page-container {
-            position: relative;
-            margin-bottom: 20px;
-            width: 100%;
-            max-width: 100%;
-            display: flex;
-            justify-content: center;
-            box-sizing: border-box;
-        }
-        .page-image {
-            max-width: 90vw;
-            height: auto;
-            display: block;
-            position: relative;
-            z-index: 1;
-            visibility: visible;
-            box-sizing: border-box;
-        }
-        .word {
-            position: absolute;
-            border: 2px solid rgb(0 0 255 / 9%);
-            background: rgb(0 0 255 / 1%);
-            cursor: pointer;
-            z-index: 10;
-            pointer-events: auto;
-        }
-        .tooltip {
-            position: fixed;
-            background: #333;
-            color: #fff;
-            padding: 10px;
-            border-radius: 5px;
-            z-index: 1000;
-            max-width: 200px;
-            text-align: left;
-            display: none;
-        }
-        .tooltip button {
-            margin-top: 5px;
-            padding: 5px 10px;
-            font-size: 12px;
-            background: #007bff;
-            color: #fff;
-            border: none;
-            border-radius: 3px;
-            cursor: pointer;
-        }
-        .image-error {
-            display: block;
-            color: red;
-            font-size: 16px;
-            margin: 10px;
-        }
-    </style>
-</head>
-<body>
-    <h1>مانهوا للقراءة أوفلاين</h1>
-    <p>تم إنشاؤه في: ${new Date().toLocaleString()}</p>
-    <div id="container_offline"></div>
-    <div id="offlineDataStorage" style="display:none;">${JSON.stringify(dataToSave)}</div>
-    <script>
-        const offlineContainer = document.getElementById("container_offline");
-        const storedDataElement = document.getElementById("offlineDataStorage");
-        let offlinePagesData = [];
-        try {
-            offlinePagesData = JSON.parse(storedDataElement.textContent);
-        } catch (e) {
-            console.error("Failed to parse offline data:", e);
-            offlineContainer.innerHTML = "<p>خطأ في تحميل بيانات المانهوا.</p>";
-        }
-        function isValidBase64Image(base64Str) {
-            if (!base64Str || typeof base64Str !== 'string') return false;
-            const base64Regex = /^data:image\\/(jpeg|png);base64,[A-Za-z0-9+\\/=]+$/;
-            return base64Regex.test(base64Str) && base64Str.length > 100;
-        }
-        const observer = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    const pageContainer = entry.target;
-                    const img = pageContainer.querySelector(".page-image");
-                    const pageNum = pageContainer.dataset.pageNum;
-                    const pageData = offlinePagesData.find(p => p.pageNum == pageNum);
-                    if (pageData && img) {
-                        if (pageData.wordsData?.length > 0) {
-                            drawWordBoxesOffline(pageData.wordsData, img, pageContainer);
-                            console.log(\`Word boxes drawn for offline page \${pageNum} via observer\`);
-                        } else {
-                            console.log(\`No words to draw for offline page \${pageNum}\`);
-                        }
-                    }
-                    observer.unobserve(entry.target);
-                }
-            });
-        }, { threshold: 0.1 });
-        function drawWordBoxesOffline(words, imgElement, pageContainerElement) {
-            const existingWords = pageContainerElement.querySelectorAll(".word");
-            existingWords.forEach(wordDiv => wordDiv.remove());
-            const scaleX = imgElement.clientWidth / imgElement.naturalWidth;
-            const scaleY = imgElement.clientHeight / imgElement.naturalHeight;
-            const imgRect = imgElement.getBoundingClientRect();
-            const containerRect = pageContainerElement.getBoundingClientRect();
-            const offsetX = imgRect.left - containerRect.left;
-            const offsetY = imgRect.top - containerRect.top;
-            console.log(\`Drawing \${words.length} word boxes for offline page\`);
-            for (const word of words) {
-                const box = word.bbox;
-                if (!box) continue;
-                const wordDiv = document.createElement("div");
-                wordDiv.className = "word";
-                wordDiv.style.left = \`\${(box.x0 * scaleX) + offsetX}px\`;
-                wordDiv.style.top = \`\${(box.y0 * scaleY) + offsetY}px\`;
-                wordDiv.style.width = \`\${(box.x1 - box.x0) * scaleX}px\`;
-                wordDiv.style.height = \`\${(box.y1 - box.y0) * scaleY}px\`;
-                pageContainerElement.appendChild(wordDiv);
-                wordDiv.addEventListener("click", (e) => {
-                    e.stopPropagation();
-                    showTooltipOffline(wordDiv, word.text, word.translation, e.clientX, e.clientY);
-                });
-            }
-        }
-        function showTooltipOffline(wordDiv, originalWord, translation, x, y) {
-            const existingTooltip = document.querySelector(".tooltip");
-            if (existingTooltip) existingTooltip.remove();
-            const tooltip = document.createElement("div");
-            tooltip.className = "tooltip";
-            tooltip.innerHTML = \`<div><strong>الكلمة:</strong> \${originalWord}<br><strong>الترجمة:</strong> \${translation}<br><button onclick="pronounceWordOffline('\${originalWord.replace(/[^a-zA-Z0-9\\\\s]/g, '')}')">نطق الكلمة</button></div>\`;
-            document.body.appendChild(tooltip);
-            const rect = tooltip.getBoundingClientRect();
-            let left = x + 15, top = y + 15;
-            if (left + rect.width > window.innerWidth) left = x - rect.width - 15;
-            if (top + rect.height > window.innerHeight) top = y - rect.height - 15;
-            if (left < 0) left = 5;
-            if (top < 0) top = 5;
-            tooltip.style.left = \`\${left}px\`;
-            tooltip.style.top = \`\${top}px\`;
-            tooltip.style.display = "block";
-            document.addEventListener("click", function closeTT(event) {
-                if (!tooltip.contains(event.target) && event.target !== wordDiv) {
-                    tooltip.remove();
-                    document.removeEventListener("click", closeTT, true);
-                }
-            }, true);
-        }
-        window.pronounceWordOffline = function (wordToPronounce) {
-            if (!window.speechSynthesis) {
-                alert("ميزة النطق غير مدعومة.");
-                return;
-            }
-            const utterance = new SpeechSynthesisUtterance(wordToPronounce);
-            utterance.lang = "en-US";
-            speechSynthesis.speak(utterance);
-        };
-        function redrawWordBoxesOnResizeOffline() {
-            if (!offlinePagesData || offlinePagesData.length === 0) return;
-            for (const pageData of offlinePagesData) {
-                const pageC = offlineContainer.querySelector(\`.page-container[data-page-num="\${pageData.pageNum}"]\`);
-                const imgEl = pageC?.querySelector(".page-image");
-                if (imgEl && pageC && pageData.wordsData?.length > 0) {
-                    requestAnimationFrame(() => {
-                        drawWordBoxesOffline(pageData.wordsData, imgEl, pageC);
-                        console.log(\`Redrawn boxes for offline page \${pageData.pageNum}\`);
-                    });
-                }
-            }
-        }
-        window.addEventListener("resize", redrawWordBoxesOnResizeOffline);
-        document.addEventListener("DOMContentLoaded", () => {
-            if (offlinePagesData.length > 0) renderOfflinePages(offlinePagesData);
-            else offlineContainer.innerHTML = "<p>لم يتم العثور على بيانات مانهوا مخزنة.</p>";
-        });
-        function renderOfflinePages(pagesToRender) {
-            offlineContainer.innerHTML = "";
-            for (const pageData of pagesToRender) {
-                if (!pageData.imgData || !isValidBase64Image(pageData.imgData)) {
-                    console.error(\`Invalid image data for page \${pageData.pageNum}\`);
-                    offlineContainer.innerHTML += \`<p class="image-error">Error: Invalid image data for page \${pageData.pageNum}</p>\`;
-                    continue;
-                }
-                const pageContainer = document.createElement("div");
-                pageContainer.className = "page-container";
-                pageContainer.dataset.pageNum = pageData.pageNum;
-                const img = document.createElement("img");
-                img.className = "page-image";
-                img.src = pageData.imgData;
-                img.alt = \`صفحة مانهوا \${pageData.pageNum}\`;
-                const testImg = new Image();
-                testImg.src = pageData.imgData;
-                testImg.onload = () => {
-                    pageContainer.appendChild(img);
-                    offlineContainer.appendChild(pageContainer);
-                    requestAnimationFrame(() => {
-                        if (pageData.wordsData?.length > 0) {
-                            drawWordBoxesOffline(pageData.wordsData, img, pageContainer);
-                            console.log(\`Word boxes drawn initially for offline page \${pageData.pageNum}\`);
-                        } else {
-                            console.log(\`No words to draw for offline page \${pageData.pageNum}\`);
-                        }
-                        observer.observe(pageContainer);
-                        console.log(\`Offline page \${pageData.pageNum} set for observer\`);
-                        pageContainer.offsetHeight;
-                    });
-                    console.log(\`Offline page \${pageData.pageNum} image loaded\`);
-                };
-                testImg.onerror = () => {
-                    console.error(\`Invalid image data for offline page \${pageData.pageNum}\`);
-                    offlineContainer.innerHTML += \`<p class="image-error">Error: Invalid image data for page \${pageData.pageNum}</p>\`;
-                };
-                img.onerror = () => console.error(\`Failed to render image for offline page \${pageData.pageNum}\`);
-            }
-        }
-    </script>
-</body>
-</html>`;
-    const blob = new Blob([htmlContent], { type: "text/html" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `manhwa_offline_${Date.now()}.html`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(link.href);
-    console.log("Offline HTML generated");
-    elements.output.textContent += "\nتم إنشاء ملف HTML للقراءة Offline.";
 }
 
 async function readFileAsArrayBuffer(file) {
@@ -1040,8 +887,36 @@ async function readFileAsArrayBuffer(file) {
         reader.readAsArrayBuffer(file);
     });
 }
+ 
+        function loadJsonManually() {
+            const input = document.getElementById("json-file-input");
+            const file = input.files[0];
+            if (!file) {
+                alert("يرجى اختيار ملف JSON.");
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                try {
+                    const offlinePagesData = JSON.parse(e.target.result);
+                    if (!Array.isArray(offlinePagesData) || offlinePagesData.length === 0) {
+                        throw new Error("بيانات غير صالحة في ملف JSON");
+                    }
+                    document.getElementById("json-upload").style.display = "none";
+                    renderOfflinePages(offlinePagesData);
+                } catch (error) {
+                    alert("خطأ: ملف JSON غير صالح.");
+                    document.getElementById("container_offline").innerHTML = "<p>خطأ: ملف JSON غير صالح.</p>";
+                }
+            };
+            reader.onerror = function () {
+                alert("خطأ: فشل قراءة ملف JSON.");
+                document.getElementById("container_offline").innerHTML = "<p>خطأ: فشل قراءة ملف JSON.</p>";
+            };
+            reader.readAsText(file);
+        }
 
-function loadOfflineHTML(htmlFile) {
+        function loadOfflineHTML(htmlFile) {
     const reader = new FileReader();
     reader.onload = (e) => {
         const htmlString = e.target.result;
@@ -1051,20 +926,27 @@ function loadOfflineHTML(htmlFile) {
         if (dataScript && dataScript.textContent) {
             try {
                 const loadedOfflineData = JSON.parse(dataScript.textContent);
-                processedPagesDataForOffline = loadedOfflineData;
-                document.getElementById('offlineData').textContent = dataScript.textContent;
-                elements.container.innerHTML = "<h2>تم تحميل بيانات الأوفلاين.</h2><p>أعد تحميل الصفحة أو قم بتشغيل العرض يدويًا إذا لزم الأمر.</p>";
-                renderPages(loadedOfflineData);
-                elements.output.textContent = "تم تحميل بيانات المانهوا من ملف HTML.";
-                elements.saveOfflineButton.style.display = "none";
-                console.log("Offline HTML data loaded");
+                if (Array.isArray(loadedOfflineData) && loadedOfflineData.length > 0) {
+                    processedPagesDataForOffline = loadedOfflineData;
+                    elements.container.innerHTML = "<h2>تم تحميل بيانات الأوفلاين.</h2><p>أعد تحميل الصفحة أو قم بتشغيل العرض يدويًا إذا لزم الأمر.</p>";
+                    renderPages(loadedOfflineData);
+                    elements.output.textContent = "تم تحميل بيانات المانهوا من ملف HTML.";
+                    elements.saveOfflineButton.style.display = "none";
+                    console.log("تم تحميل بيانات HTML أوفلاين (embedded data)");
+                } else {
+                    elements.output.textContent = "ملف HTML المحمل لا يحتوي على بيانات مانهوا صالحة.";
+                }
             } catch (err) {
-                console.error("Failed to parse offline HTML data:", err);
+                console.error("فشل قراءة بيانات HTML أوفلاين:", err);
                 elements.output.textContent = "فشل في قراءة البيانات من ملف HTML.";
             }
         } else {
             elements.output.textContent = "ملف HTML المحمل لا يحتوي على بيانات مانهوا متوقعة.";
         }
+    };
+    reader.onerror = () => {
+        console.error("فشل قراءة ملف HTML");
+        elements.output.textContent = "خطأ: فشل قراءة ملف HTML.";
     };
     reader.readAsText(htmlFile);
 }
