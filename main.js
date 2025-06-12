@@ -581,46 +581,30 @@ elements.saveOfflineButton.addEventListener("click", () => {
 
    // This function generates and downloads both the offline HTML and JSON data files for the processed manhwa pages
    async function generateAndDownloadOfflineHTML(dataToSave) {
-    elements.loading.style.display = "block";
-    elements.output.textContent = "جاري إنشاء ملفات الـ offline، الرجاء الانتظار...\n";
+    elements.loading.style.display = 'block';
+    elements.output.textContent = "Processing offline files...\n";
     try {
         const cleanedData = [];
         for (const page of dataToSave) {
             if (!page.imgData || !isValidBase64Image(page.imgData)) {
-                console.error(`Invalid image data for page ${page.pageNum}, imgData length: ${page.imgData?.length || 0}, starts with: ${page.imgData?.substring(0, 50) || 'undefined'}`);
-                elements.output.textContent += `خطأ: تخطي الصفحة ${page.pageNum} بسبب بيانات صورة غير صالحة\n`;
+                console.error(`Invalid image data for page ${page.pageNum}, imgData length: ${page.imgData?.length || 0}`);
+                elements.output.textContent += `Error: Skipping page ${page.pageNum} due to invalid image data\n`;
                 continue;
             }
             if (!page.wordsData || !Array.isArray(page.wordsData)) {
                 console.warn(`No words data for page ${page.pageNum}`);
                 page.wordsData = [];
             }
-            cleanedData.push({
-                imgData: page.imgData,
-                wordsData: page.wordsData,
-                pageNum: page.pageNum
-            });
-            console.log(`Page ${page.pageNum} added to cleanedData, imgData length: ${page.imgData.length}`);
+            // Split tall images client-side
+            const splitPages = await splitImageIfTall(page);
+            cleanedData.push(...splitPages);
         }
         if (cleanedData.length === 0) {
-            throw new Error("لا توجد بيانات صفحات صالحة للحفظ");
+            throw new Error("No valid pages to save");
         }
         console.log(`Total pages in cleanedData: ${cleanedData.length}`);
         const timestamp = Date.now();
-        let jsonData;
-        try {
-            const tempData = [];
-            for (const page of cleanedData) {
-                const pageJson = JSON.stringify(page);
-                JSON.parse(pageJson);
-                tempData.push(pageJson);
-            }
-            jsonData = `[${tempData.join(",")}]`;
-            JSON.parse(jsonData);
-        } catch (error) {
-            console.error("Failed to convert data to JSON:", error);
-            throw new Error("فشل تحويل البيانات إلى JSON: " + error.message);
-        }
+        let jsonData = JSON.stringify(cleanedData);
         const jsonBlob = new Blob([jsonData], { type: "application/json" });
         const jsonLink = document.createElement("a");
         jsonLink.href = URL.createObjectURL(jsonBlob);
@@ -642,7 +626,7 @@ elements.saveOfflineButton.addEventListener("click", () => {
         .page-container { position: relative; margin-bottom: 20px; width: 100%; max-width: 100%; display: flex; justify-content: center; box-sizing: border-box; min-height: 200px; }
         .page-image { max-width: 90vw; width: 100%; height: auto; display: block; position: relative; z-index: 1; visibility: visible; box-sizing: border-box; }
         .word-boxes-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
-        .word { position: absolute; border: 2px solid rgb(0 0 255 / 1%); background: rgb(0 0 255 / 1%); cursor: pointer; z-index: 10; pointer-events: auto; }
+        .word { position: absolute; border: 2px solid rgb(0 0 255 / 4%); background: rgb(0 0 255 / 0%); cursor: pointer; z-index: 10; pointer-events: auto; }
         .tooltip { position: fixed; background: #333; color: #fff; padding: 10px; border-radius: 5px; z-index: 1000; max-width: 200px; text-align: left; display: none; }
         .tooltip button { margin-top: 5px; padding: 5px 10px; font-size: 12px; background: #007bff; color: #fff; border: none; border-radius: 3px; cursor: pointer; }
         .image-error { display: block; color: red; font-size: 16px; margin: 10px; }
@@ -699,7 +683,23 @@ elements.saveOfflineButton.addEventListener("click", () => {
             return base64Regex.test(base64Str) && base64Str.length > 100;
         }
 
-        function drawWordBoxesOffline(words, imgElement, pageContainerElement) {
+        function preloadImage(src) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.src = src;
+                img.onload = () => {
+                    console.log("Image preloaded, dimensions: " + img.naturalWidth + "x" + img.naturalHeight);
+                    resolve(img);
+                };
+                img.onerror = () => {
+                    console.error("Failed to preload image");
+                    reject(new Error("Failed to preload image"));
+                };
+            });
+        }
+
+        function drawWordBoxesOffline(words, imgElement, pageContainerElement, pageData) {
+            console.log("Drawing word boxes for page " + pageContainerElement.dataset.pageNum);
             let boxesContainer = pageContainerElement.querySelector('.word-boxes-container');
             if (boxesContainer) boxesContainer.remove();
             boxesContainer = document.createElement('div');
@@ -707,28 +707,44 @@ elements.saveOfflineButton.addEventListener("click", () => {
             boxesContainer.style.position = 'absolute';
             boxesContainer.style.top = '0';
             boxesContainer.style.left = '0';
-            boxesContainer.style.width = '100%';
-            boxesContainer.style.height = '100%';
+            boxesContainer.style.width = imgElement.width + 'px';
+            boxesContainer.style.height = imgElement.height + 'px';
             boxesContainer.style.pointerEvents = 'none';
             boxesContainer.style.zIndex = '10';
             pageContainerElement.appendChild(boxesContainer);
-            const naturalWidth = imgElement.naturalWidth;
-            const naturalHeight = imgElement.naturalHeight;
-            if (!naturalWidth || !naturalHeight) {
-                console.error("Invalid image dimensions for page");
+            const naturalWidth = imgElement.naturalWidth || pageData.imageWidth;
+            const naturalHeight = imgElement.naturalHeight || pageData.imageHeight;
+            const renderedWidth = imgElement.width;
+            const renderedHeight = imgElement.height;
+            if (!naturalWidth || !naturalHeight || !renderedWidth || !renderedHeight) {
+                console.error("Invalid dimensions for page " + pageContainerElement.dataset.pageNum + ": natural=" + naturalWidth + "x" + naturalHeight + ", rendered=" + renderedWidth + "x" + renderedHeight);
+                pageContainerElement.innerHTML += "<p class='image-error'>Error: Invalid image dimensions for page " + pageContainerElement.dataset.pageNum + "</p>";
                 return;
             }
+            console.log("Using dimensions for page " + pageContainerElement.dataset.pageNum + ": natural=" + naturalWidth + "x" + naturalHeight + ", rendered=" + renderedWidth + "x" + renderedHeight);
+            const scaleX = renderedWidth / naturalWidth;
+            const scaleY = renderedHeight / naturalHeight;
+            let validBoxes = 0;
             for (var i = 0; i < words.length; i++) {
                 var word = words[i];
                 var box = word.bbox;
-                if (!box) continue;
+                if (!box || typeof box.x0 !== 'number' || typeof box.y0 !== 'number' || typeof box.x1 !== 'number' || typeof box.y1 !== 'number') {
+                    console.warn("Invalid bbox for word in page " + pageContainerElement.dataset.pageNum + ": ", word);
+                    continue;
+                }
+                if (box.x0 < 0 || box.y0 < 0 || box.x1 > naturalWidth || box.y1 > naturalHeight || box.x0 > box.x1 || box.y0 > box.y1) {
+                    console.warn("Out-of-bounds bbox for word in page " + pageContainerElement.dataset.pageNum + ": ", box);
+                    continue;
+                }
+                validBoxes++;
                 var wordDiv = document.createElement('div');
                 wordDiv.className = 'word';
                 wordDiv.style.position = 'absolute';
-                wordDiv.style.left = ((box.x0 / naturalWidth) * 100) + '%';
-                wordDiv.style.top = ((box.y0 / naturalHeight) * 100) + '%';
-                wordDiv.style.width = (((box.x1 - box.x0) / naturalWidth) * 100) + '%';
-                wordDiv.style.height = (((box.y1 - box.y0) / naturalHeight) * 100) + '%';
+                 
+                wordDiv.style.left = ((box.x0 * scaleX) + 16) + 'px';
+                wordDiv.style.top = (box.y0 * scaleY) + 'px';
+                wordDiv.style.width = ((box.x1 - box.x0) * scaleX) + 'px';
+                wordDiv.style.height = ((box.y1 - box.y0) * scaleY) + 'px';
                 wordDiv.style.pointerEvents = 'auto';
                 wordDiv.addEventListener('click', (function(word) {
                     return function(e) {
@@ -738,21 +754,32 @@ elements.saveOfflineButton.addEventListener("click", () => {
                 })(word));
                 boxesContainer.appendChild(wordDiv);
             }
+            console.log("Drew " + validBoxes + " valid word boxes for page " + pageContainerElement.dataset.pageNum + " out of " + words.length + " words");
         }
 
-        function ensureDrawWordBoxes(words, imgElement, pageContainerElement) {
-            if (imgElement.complete && imgElement.naturalWidth && imgElement.naturalHeight) {
-                drawWordBoxesOffline(words, imgElement, pageContainerElement);
-            } else {
-                imgElement.onload = function() {
-                    console.log("Image loaded for page " + pageContainerElement.dataset.pageNum);
-                    drawWordBoxesOffline(words, imgElement, pageContainerElement);
+        function ensureDrawWordBoxes(words, imgElement, pageContainerElement, pageData) {
+            const attemptDraw = (attempts = 0) => {
+                if (imgElement.complete && imgElement.naturalWidth && imgElement.naturalHeight && imgElement.width && imgElement.height) {
+                    console.log("Image ready, drawing word boxes for page " + pageContainerElement.dataset.pageNum);
+                    drawWordBoxesOffline(words, imgElement, pageContainerElement, pageData);
+                } else if (attempts < 15) {
+                    console.log("Image not ready for page " + pageContainerElement.dataset.pageNum + ", attempt " + (attempts + 1));
+                    setTimeout(() => attemptDraw(attempts + 1), 1000);
+                } else {
+                    console.error("Failed to draw word boxes for page " + pageContainerElement.dataset.pageNum + ": Image not loaded after 15 attempts");
+                    drawWordBoxesOffline(words, imgElement, pageContainerElement, pageData);
+                }
+            };
+            preloadImage(imgElement.src).then(() => {
+                imgElement.onload = () => {
+                    console.log("Image rendered for page " + pageContainerElement.dataset.pageNum + ": " + imgElement.width + "x" + imgElement.height);
+                    attemptDraw();
                 };
-                imgElement.onerror = function() {
-                    console.error("Failed to load image for page " + pageContainerElement.dataset.pageNum);
-                    pageContainerElement.innerHTML += "<p class='image-error'>Error: Failed to load image for page " + pageContainerElement.dataset.pageNum + "</p>";
-                };
-            }
+                if (imgElement.complete) attemptDraw();
+            }).catch((error) => {
+                console.error("Preload failed for page " + pageContainerElement.dataset.pageNum + ": ", error);
+                attemptDraw();
+            });
         }
 
         function showTooltipOffline(wordDiv, originalWord, translation, x, y) {
@@ -810,13 +837,25 @@ elements.saveOfflineButton.addEventListener("click", () => {
             }
         };
 
-        function redrawWordBoxesOnResizeOffline() {
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+
+        const redrawWordBoxesOnResizeOffline = debounce(function() {
             if (!offlinePagesData || offlinePagesData.length === 0) return;
             for (var i = 0; i < offlinePagesData.length; i++) {
                 (function(pageData, pageC, imgEl) {
                     if (imgEl && pageC && pageData.wordsData && pageData.wordsData.length > 0) {
                         requestAnimationFrame(function() {
-                            ensureDrawWordBoxes(pageData.wordsData, imgEl, pageC);
+                            ensureDrawWordBoxes(pageData.wordsData, imgEl, pageC, pageData);
                         });
                     }
                 })(
@@ -825,7 +864,8 @@ elements.saveOfflineButton.addEventListener("click", () => {
                     offlineContainer.querySelector('.page-container[data-page-num="' + offlinePagesData[i].pageNum + '"]')?.querySelector('.page-image')
                 );
             }
-        }
+        }, 500);
+
         window.addEventListener('resize', redrawWordBoxesOnResizeOffline);
 
         function renderOfflinePages(pagesToRender) {
@@ -835,7 +875,7 @@ elements.saveOfflineButton.addEventListener("click", () => {
                 var pageData = pagesToRender[i];
                 console.log("Processing page " + pageData.pageNum + ", imgData length: " + (pageData.imgData?.length || 0) + ", valid: " + isValidBase64Image(pageData.imgData));
                 if (!pageData.imgData || !isValidBase64Image(pageData.imgData)) {
-                    console.error("Invalid image data for page " + pageData.pageNum + ", imgData starts with: " + (pageData.imgData?.substring(0, 50) || 'undefined'));
+                    console.error("Invalid image data for page " + pageData.pageNum);
                     offlineContainer.innerHTML += '<p class="image-error">Error: Invalid image data for page ' + pageData.pageNum + '</p>';
                     continue;
                 }
@@ -848,15 +888,13 @@ elements.saveOfflineButton.addEventListener("click", () => {
                 pageContainer.dataset.pageNum = pageData.pageNum;
                 var img = document.createElement('img');
                 img.className = 'page-image';
+                img.src = pageData.imgData;
                 img.alt = 'صفحة مانهوا ' + pageData.pageNum;
                 img.style.width = '100%';
                 img.style.height = 'auto';
-                // Set src directly to avoid lazy-loading issues
-                img.src = pageData.imgData;
                 pageContainer.appendChild(img);
                 offlineContainer.appendChild(pageContainer);
-                // Draw word boxes immediately if image is loaded
-                ensureDrawWordBoxes(pageData.wordsData, img, pageContainer);
+                ensureDrawWordBoxes(pageData.wordsData, img, pageContainer, pageData);
             }
         }
     </script>
@@ -876,8 +914,55 @@ elements.saveOfflineButton.addEventListener("click", () => {
         console.error("Failed to generate offline files:", error);
         elements.output.textContent += `خطأ: فشل إنشاء ملفات الـ offline: ${error.message}\n`;
     } finally {
-        elements.loading.style.display = "none";
+        elements.loading.style.display = 'none';
     }
+}
+
+async function splitImageIfTall(page) {
+    const maxHeight = 10000;
+    const img = new Image();
+    img.src = page.imgData;
+    await new Promise(resolve => img.onload = resolve);
+    if (img.height <= maxHeight) {
+        return [{
+            imgData: page.imgData,
+            wordsData: page.wordsData,
+            pageNum: page.pageNum,
+            imageWidth: img.width,
+            imageHeight: img.height
+        }];
+    }
+    console.log(`Splitting image for page ${page.pageNum}: ${img.height}px > ${maxHeight}px`);
+    const segments = Math.ceil(img.height / maxHeight);
+    const results = [];
+    for (let i = 0; i < segments; i++) {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = img.width;
+        canvas.height = Math.min(maxHeight, img.height - i * maxHeight);
+        ctx.drawImage(img, 0, i * maxHeight, img.width, canvas.height, 0, 0, img.width, canvas.height);
+        const compressed = canvas.toDataURL('image/jpeg', 0.4);
+        const yOffset = i * maxHeight;
+        const adjustedWords = page.wordsData
+            .map(word => ({
+                ...word,
+                bbox: {
+                    ...word.bbox,
+                    y0: word.bbox.y0 - yOffset,
+                    y1: word.bbox.y1 - yOffset
+                }
+            }))
+            .filter(w => w.bbox.y0 >= 0 && w.bbox.y1 <= canvas.height);
+        results.push({
+            imgData: compressed,
+            wordsData: adjustedWords,
+            pageNum: `${page.pageNum}.${i + 1}`,
+            imageWidth: img.width,
+            imageHeight: canvas.height
+        });
+        console.log(`Created segment ${page.pageNum}.${i + 1}: ${img.width}x${canvas.height}, ${adjustedWords.length} words`);
+    }
+    return results;
 }
 
 async function readFileAsArrayBuffer(file) {
